@@ -4,7 +4,7 @@ import mongoose from 'mongoose';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
 import dotenv from 'dotenv';
-import authRoutes from './routes/auth.js'; // Ensure you add the `.js` extension
+import authRoutes from './routes/auth.js';
 import appointmentsRoutes from './routes/appointments.js';
 import prescriptionsRoutes from './routes/prescriptions.js';
 import healthRecordsRoutes from './routes/healthRecords.js';
@@ -12,9 +12,7 @@ import doctorsRoutes from './routes/doctors.js';
 import messageRoutes from './routes/messages.js';
 import queueRoutes from './routes/queue.js';
 import symptomCheckerRoutes from './routes/symptomChecker.js';
-//import auth from './middleware/auth.js';
-
-
+import paymentsRoutes from './routes/payments.js';
 
 dotenv.config();
 
@@ -35,9 +33,18 @@ app.use(cors({
 app.use(express.json());
 
 // Database connection
-mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/patient-panel')
-  .then(() => console.log('Connected to MongoDB'))
-  .catch(err => console.error('MongoDB connection error:', err));
+mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/patient-panel', {
+  useNewUrlParser: true,
+  useUnifiedTopology: true
+})
+.then(() => console.log('Connected to MongoDB'))
+.catch(err => {
+  console.error('MongoDB connection error:', err);
+  process.exit(1);
+});
+
+// Special middleware for Stripe webhooks
+app.use('/api/payments/webhook', express.raw({ type: 'application/json' }));
 
 // Routes
 app.use('/api/auth', authRoutes);
@@ -48,7 +55,13 @@ app.use('/api/doctors', doctorsRoutes);
 app.use('/api/messages', messageRoutes);
 app.use('/api/queue', queueRoutes);
 app.use('/api/symptom-checker', symptomCheckerRoutes);
+app.use('/api/payments', paymentsRoutes);
 
+// Error handling middleware
+app.use((err, req, res, next) => {
+  console.error(err.stack);
+  res.status(500).json({ message: 'Something went wrong!' });
+});
 
 // Socket.IO connection handling
 io.on('connection', (socket) => {

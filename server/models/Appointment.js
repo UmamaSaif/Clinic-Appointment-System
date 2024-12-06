@@ -33,6 +33,20 @@ const AppointmentSchema = new mongoose.Schema({
     enum: ['in-person', 'video', 'phone'],
     default: 'in-person'
   },
+  paymentStatus: {
+    type: String,
+    enum: ['pending', 'paid', 'refunded'],
+    default: 'pending'
+  },
+  paymentMethod: {
+    type: String,
+    enum: ['cash', 'online'],
+    required: true
+  },
+  consultationFee: {
+    type: Number,
+    required: true
+  },
   queueNumber: {
     type: Number,
     required: true

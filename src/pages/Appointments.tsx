@@ -17,11 +17,13 @@ import {
 } from '@mui/material';
 import { DataGrid, GridColDef } from '@mui/x-data-grid';
 import axios from 'axios';
+import PaymentModal from '../components/PaymentModel.tsx';
 
 interface Doctor {
   _id: string;
   name: string;
   specialty: string;
+  consultationFee: number;
 }
 
 interface Appointment {
@@ -31,12 +33,15 @@ interface Appointment {
   status: string;
   queueNumber: string;
   consultationType: string;
+  paymentStatus: string;
+  paymentMethod: string;
 }
 
 export default function Appointments() {
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [doctors, setDoctors] = useState<Doctor[]>([]);
   const [openDialog, setOpenDialog] = useState(false);
+  const [openPaymentModal, setOpenPaymentModal] = useState(false);
   const [openSnackbar, setOpenSnackbar] = useState(false);
   const [snackbarMessage, setSnackbarMessage] = useState('');
   const [snackbarSeverity, setSnackbarSeverity] = useState<'success' | 'error'>('success');
@@ -53,6 +58,7 @@ export default function Appointments() {
     consultationType: 'in-person',
     additionalDetails: ''
   });
+  const [selectedDoctor, setSelectedDoctor] = useState<Doctor | null>(null);
 
   useEffect(() => {
     fetchAppointments();
@@ -70,7 +76,7 @@ export default function Appointments() {
 
   const searchDoctors = async () => {
     try {
-      const response = await axios.get('/api/appointments/doctors/search', {
+      const response = await axios.get('/api/doctors/search', {
         params: searchCriteria
       });
       setDoctors(response.data);
@@ -86,18 +92,31 @@ export default function Appointments() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    // Validate form data
     if (!formData.doctorId || !formData.date || !formData.symptoms) {
       showSnackbar('Please fill in all required fields', 'error');
       return;
     }
 
+    const appointmentData = {
+      ...formData,
+      consultationFee: selectedDoctor?.consultationFee || 0,
+      doctor: selectedDoctor
+    };
+
+    setOpenDialog(false);
+    setOpenPaymentModal(true);
+    
+    // Store appointment data temporarily
+    localStorage.setItem('pendingAppointment', JSON.stringify(appointmentData));
+  };
+
+  const handlePaymentComplete = async () => {
     try {
-      const response = await axios.post('/api/appointments', formData);
+      await fetchAppointments();
       showSnackbar('Appointment booked successfully', 'success');
       
-      setOpenDialog(false);
-      fetchAppointments();
+      // Clear temporary storage
+      localStorage.removeItem('pendingAppointment');
       
       // Reset form
       setFormData({
@@ -108,8 +127,8 @@ export default function Appointments() {
         additionalDetails: ''
       });
     } catch (error) {
-      console.error('Error creating appointment:', error);
-      showSnackbar('Failed to book appointment', 'error');
+      console.error('Error after payment completion:', error);
+      showSnackbar('Error finalizing appointment', 'error');
     }
   };
 
@@ -139,13 +158,20 @@ export default function Appointments() {
       valueGetter: (params) => params.row.status.charAt(0).toUpperCase() + params.row.status.slice(1)
     },
     {
-      field: 'queueNumber',
-      headerName: 'Queue Number',
-      flex: 1
+      field: 'paymentStatus',
+      headerName: 'Payment Status',
+      flex: 1,
+      valueGetter: (params) => params.row.paymentStatus.charAt(0).toUpperCase() + params.row.paymentStatus.slice(1)
     },
     {
-      field: 'consultationType',
-      headerName: 'Consultation Type',
+      field: 'paymentMethod',
+      headerName: 'Payment Method',
+      flex: 1,
+      valueGetter: (params) => params.row.paymentMethod.charAt(0).toUpperCase() + params.row.paymentMethod.slice(1)
+    },
+    {
+      field: 'queueNumber',
+      headerName: 'Queue Number',
       flex: 1
     }
   ];
@@ -160,7 +186,6 @@ export default function Appointments() {
               variant="contained"
               color="primary"
               onClick={() => {
-                // Trigger doctor search if no doctors are loaded
                 if (doctors.length === 0) {
                   searchDoctors();
                 }
@@ -172,7 +197,6 @@ export default function Appointments() {
           </Box>
         </Grid>
 
-        {/* Doctor Search Section */}
         <Grid item xs={12}>
           <Paper sx={{ p: 2, mb: 2 }}>
             <Typography variant="h6" gutterBottom>
@@ -251,7 +275,7 @@ export default function Appointments() {
               <Grid item xs={12}>
                 <Autocomplete
                   options={doctors}
-                  getOptionLabel={(doctor) => `Dr. ${doctor.name} - ${doctor.specialty}`}
+                  getOptionLabel={(doctor) => `Dr. ${doctor.name} - ${doctor.specialty} ($${doctor.consultationFee})`}
                   renderInput={(params) => (
                     <TextField
                       {...params}
@@ -260,8 +284,9 @@ export default function Appointments() {
                       fullWidth
                     />
                   )}
-                  value={doctors.find(d => d._id === formData.doctorId) || null}
+                  value={selectedDoctor}
                   onChange={(_, newValue) => {
+                    setSelectedDoctor(newValue);
                     setFormData({ 
                       ...formData, 
                       doctorId: newValue?._id || '' 
@@ -326,10 +351,17 @@ export default function Appointments() {
         <DialogActions>
           <Button onClick={() => setOpenDialog(false)}>Cancel</Button>
           <Button onClick={handleSubmit} variant="contained" color="primary">
-            Book Appointment
+            Proceed to Payment
           </Button>
         </DialogActions>
       </Dialog>
+
+      <PaymentModal
+        open={openPaymentModal}
+        onClose={() => setOpenPaymentModal(false)}
+        appointmentData={JSON.parse(localStorage.getItem('pendingAppointment') || '{}')}
+        onPaymentComplete={handlePaymentComplete}
+      />
 
       <Snackbar
         open={openSnackbar}

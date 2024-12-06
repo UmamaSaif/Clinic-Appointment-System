@@ -1,6 +1,7 @@
 import express from 'express';
 import auth from '../middleware/auth.js';
 import User from '../models/User.js';
+import Doctor from '../models/Doctor.js';
 
 const router = express.Router();
 
@@ -8,41 +9,69 @@ const router = express.Router();
 router.get('/', auth, async (req, res) => {
   try {
     const doctors = await User.find({ role: 'doctor' })
-      .select('name specialty availability')
-      .sort({ name: 1 });
+      .select('name specialty')
+      .populate('doctor');
     res.json(doctors);
   } catch (error) {
+    console.error('Error fetching doctors:', error);
     res.status(500).json({ message: 'Error fetching doctors' });
   }
 });
 
-// Search doctors by name, specialty, or availability
+// Search doctors with advanced filtering
 router.get('/search', auth, async (req, res) => {
   try {
-    const { query, specialty, date } = req.query;
-    const searchQuery = {
-      role: 'doctor'
-    };
-
-    if (query) {
-      searchQuery.name = { $regex: query, $options: 'i' };
-    }
-
-    if (specialty) {
-      searchQuery.specialty = specialty;
-    }
-
-    if (date) {
-      // Add availability check logic here
-      searchQuery['availability.date'] = new Date(date);
-    }
-
-    const doctors = await User.find(searchQuery)
-      .select('name specialty availability')
-      .sort({ name: 1 });
+    const { name, specialty, availableDate, availableTime } = req.query;
     
-    res.json(doctors);
+    let query = { role: 'doctor' };
+    
+    if (name) {
+      query.name = { $regex: name, $options: 'i' };
+    }
+    
+    if (specialty) {
+      query.specialty = { $regex: specialty, $options: 'i' };
+    }
+
+    const doctors = await User.find(query)
+      .select('name specialty')
+      .populate({
+        path: 'doctor',
+        select: 'consultationFee availability qualifications experience rating'
+      });
+
+    // Filter by availability if date/time is provided
+    let filteredDoctors = doctors;
+    if (availableDate) {
+      filteredDoctors = doctors.filter(doctor => {
+        const availability = doctor.doctor?.availability || [];
+        return availability.some(slot => {
+          const slotDate = new Date(slot.date).toISOString().split('T')[0];
+          const queryDate = new Date(availableDate).toISOString().split('T')[0];
+          
+          if (availableTime) {
+            return slotDate === queryDate && 
+                   slot.slots.some(timeSlot => 
+                     timeSlot.time === availableTime && !timeSlot.isBooked
+                   );
+          }
+          return slotDate === queryDate;
+        });
+      });
+    }
+
+    res.json(filteredDoctors.map(doctor => ({
+      _id: doctor._id,
+      name: doctor.name,
+      specialty: doctor.specialty,
+      consultationFee: doctor.doctor?.consultationFee || 0,
+      qualifications: doctor.doctor?.qualifications || [],
+      experience: doctor.doctor?.experience || 0,
+      rating: doctor.doctor?.rating || 0,
+      availability: doctor.doctor?.availability || []
+    })));
   } catch (error) {
+    console.error('Error searching doctors:', error);
     res.status(500).json({ message: 'Error searching doctors' });
   }
 });
@@ -50,15 +79,26 @@ router.get('/search', auth, async (req, res) => {
 // Get doctor's availability
 router.get('/:id/availability', auth, async (req, res) => {
   try {
-    const doctor = await User.findOne({ _id: req.params.id, role: 'doctor' })
+    const { date } = req.query;
+    const doctor = await Doctor.findOne({ user: req.params.id })
       .select('availability');
     
     if (!doctor) {
       return res.status(404).json({ message: 'Doctor not found' });
     }
 
-    res.json(doctor.availability);
+    let availability = doctor.availability;
+    if (date) {
+      availability = availability.filter(slot => {
+        const slotDate = new Date(slot.date).toISOString().split('T')[0];
+        const queryDate = new Date(date).toISOString().split('T')[0];
+        return slotDate === queryDate;
+      });
+    }
+
+    res.json(availability);
   } catch (error) {
+    console.error('Error fetching doctor availability:', error);
     res.status(500).json({ message: 'Error fetching doctor availability' });
   }
 });
