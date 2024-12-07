@@ -13,79 +13,78 @@ import {
   Paper,
   Autocomplete,
   Snackbar,
-  Alert
+  Alert,
+  CircularProgress
 } from '@mui/material';
 import { DataGrid, GridColDef } from '@mui/x-data-grid';
-import axios from 'axios';
-import PaymentModal from '../components/PaymentModel.tsx';
-
-interface Doctor {
-  _id: string;
-  name: string;
-  specialty: string;
-  consultationFee: number;
-}
-
-interface Appointment {
-  _id: string;
-  doctor: Doctor;
-  date: string;
-  status: string;
-  queueNumber: string;
-  consultationType: string;
-  paymentStatus: string;
-  paymentMethod: string;
-}
+import { Doctor, Appointment, SearchCriteria, AppointmentFormData } from '../types/appointment';
+import { searchDoctors, getAllDoctors } from '../services/doctorService';
+import { fetchAppointments, createAppointment } from '../services/appointmentService';
 
 export default function Appointments() {
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [doctors, setDoctors] = useState<Doctor[]>([]);
   const [openDialog, setOpenDialog] = useState(false);
-  const [openPaymentModal, setOpenPaymentModal] = useState(false);
   const [openSnackbar, setOpenSnackbar] = useState(false);
   const [snackbarMessage, setSnackbarMessage] = useState('');
   const [snackbarSeverity, setSnackbarSeverity] = useState<'success' | 'error'>('success');
-  const [searchCriteria, setSearchCriteria] = useState({
+  const [loading, setLoading] = useState(false);
+  
+  const [searchCriteria, setSearchCriteria] = useState<SearchCriteria>({
     name: '',
     specialty: '',
     availableDate: '',
     availableTime: ''
   });
-  const [formData, setFormData] = useState({
+
+  const [formData, setFormData] = useState<AppointmentFormData>({
     doctorId: '',
     date: '',
     symptoms: '',
     consultationType: 'in-person',
     additionalDetails: ''
   });
-  const [selectedDoctor, setSelectedDoctor] = useState<Doctor | null>(null);
 
   useEffect(() => {
-    fetchAppointments();
+    loadInitialData();
   }, []);
 
-  const fetchAppointments = async () => {
+  const loadInitialData = async () => {
+    setLoading(true);
     try {
-      const response = await axios.get('/api/appointments');
-      setAppointments(response.data);
+      const [appointmentsData, doctorsData] = await Promise.all([
+        fetchAppointments(),
+        getAllDoctors()
+      ]);
+      setAppointments(appointmentsData);
+      setDoctors(doctorsData);
     } catch (error) {
-      console.error('Error fetching appointments:', error);
-      showSnackbar('Error fetching appointments', 'error');
+      console.error('Error loading initial data:', error);
+      showSnackbar('Error loading data. Please refresh the page.', 'error');
+    } finally {
+      setLoading(false);
     }
   };
 
-  const searchDoctors = async () => {
+  const handleDoctorSearch = async () => {
+    setLoading(true);
     try {
-      const response = await axios.get('/api/doctors/search', {
-        params: searchCriteria
-      });
-      setDoctors(response.data);
-      if (response.data.length === 0) {
-        showSnackbar('No doctors found matching your search criteria', 'error');
+      const searchParams: Record<string, string> = {};
+      if (searchCriteria.name) searchParams.name = searchCriteria.name;
+      if (searchCriteria.specialty) searchParams.specialty = searchCriteria.specialty;
+      if (searchCriteria.availableDate) searchParams.date = searchCriteria.availableDate;
+
+      const doctorsData = await searchDoctors(searchParams);
+      setDoctors(doctorsData);
+      
+      if (doctorsData.length === 0) {
+        showSnackbar('No doctors found. Please try different search criteria.', 'error');
       }
     } catch (error) {
       console.error('Error searching doctors:', error);
-      showSnackbar('Error searching doctors', 'error');
+      showSnackbar('Error searching doctors. Please try again.', 'error');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -97,28 +96,15 @@ export default function Appointments() {
       return;
     }
 
-    const appointmentData = {
-      ...formData,
-      consultationFee: selectedDoctor?.consultationFee || 0,
-      doctor: selectedDoctor
-    };
-
-    setOpenDialog(false);
-    setOpenPaymentModal(true);
-    
-    // Store appointment data temporarily
-    localStorage.setItem('pendingAppointment', JSON.stringify(appointmentData));
-  };
-
-  const handlePaymentComplete = async () => {
+    setLoading(true);
     try {
-      await fetchAppointments();
+      await createAppointment(formData);
       showSnackbar('Appointment booked successfully', 'success');
       
-      // Clear temporary storage
-      localStorage.removeItem('pendingAppointment');
+      setOpenDialog(false);
+      const updatedAppointments = await fetchAppointments();
+      setAppointments(updatedAppointments);
       
-      // Reset form
       setFormData({
         doctorId: '',
         date: '',
@@ -126,9 +112,14 @@ export default function Appointments() {
         consultationType: 'in-person',
         additionalDetails: ''
       });
-    } catch (error) {
-      console.error('Error after payment completion:', error);
-      showSnackbar('Error finalizing appointment', 'error');
+    } catch (error: any) {
+      console.error('Error creating appointment:', error);
+      showSnackbar(
+        error.response?.data?.message || 'Failed to book appointment. Please try again.',
+        'error'
+      );
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -143,7 +134,7 @@ export default function Appointments() {
       field: 'doctor',
       headerName: 'Doctor',
       flex: 1,
-      valueGetter: (params) => params.row.doctor.name
+      valueGetter: (params) => params.row.doctor?.name || 'N/A'
     },
     {
       field: 'date',
@@ -158,21 +149,17 @@ export default function Appointments() {
       valueGetter: (params) => params.row.status.charAt(0).toUpperCase() + params.row.status.slice(1)
     },
     {
-      field: 'paymentStatus',
-      headerName: 'Payment Status',
-      flex: 1,
-      valueGetter: (params) => params.row.paymentStatus.charAt(0).toUpperCase() + params.row.paymentStatus.slice(1)
-    },
-    {
-      field: 'paymentMethod',
-      headerName: 'Payment Method',
-      flex: 1,
-      valueGetter: (params) => params.row.paymentMethod.charAt(0).toUpperCase() + params.row.paymentMethod.slice(1)
-    },
-    {
       field: 'queueNumber',
       headerName: 'Queue Number',
       flex: 1
+    },
+    {
+      field: 'consultationType',
+      headerName: 'Consultation Type',
+      flex: 1,
+      valueGetter: (params) => 
+        params.row.consultationType?.charAt(0).toUpperCase() + 
+        params.row.consultationType?.slice(1).replace('-', ' ') || 'N/A'
     }
   ];
 
@@ -185,12 +172,7 @@ export default function Appointments() {
             <Button
               variant="contained"
               color="primary"
-              onClick={() => {
-                if (doctors.length === 0) {
-                  searchDoctors();
-                }
-                setOpenDialog(true);
-              }}
+              onClick={() => setOpenDialog(true)}
             >
               Book New Appointment
             </Button>
@@ -243,9 +225,10 @@ export default function Appointments() {
                   fullWidth
                   variant="contained"
                   color="primary"
-                  onClick={searchDoctors}
+                  onClick={handleDoctorSearch}
+                  disabled={loading}
                 >
-                  Search Doctors
+                  {loading ? <CircularProgress size={24} /> : 'Search Doctors'}
                 </Button>
               </Grid>
             </Grid>
@@ -254,15 +237,21 @@ export default function Appointments() {
 
         <Grid item xs={12}>
           <Paper sx={{ height: 400 }}>
-            <DataGrid
-              rows={appointments}
-              columns={columns}
-              getRowId={(row) => row._id}
-              pageSizeOptions={[5, 10, 25]}
-              initialState={{
-                pagination: { paginationModel: { pageSize: 5 } },
-              }}
-            />
+            {loading ? (
+              <Box display="flex" justifyContent="center" alignItems="center" height="100%">
+                <CircularProgress />
+              </Box>
+            ) : (
+              <DataGrid
+                rows={appointments}
+                columns={columns}
+                getRowId={(row) => row._id}
+                pageSizeOptions={[5, 10, 25]}
+                initialState={{
+                  pagination: { paginationModel: { pageSize: 5 } },
+                }}
+              />
+            )}
           </Paper>
         </Grid>
       </Grid>
@@ -275,18 +264,19 @@ export default function Appointments() {
               <Grid item xs={12}>
                 <Autocomplete
                   options={doctors}
-                  getOptionLabel={(doctor) => `Dr. ${doctor.name} - ${doctor.specialty} ($${doctor.consultationFee})`}
+                  getOptionLabel={(doctor) => `Dr. ${doctor.name} - ${doctor.specialty}`}
                   renderInput={(params) => (
                     <TextField
                       {...params}
                       label="Select Doctor"
                       required
                       fullWidth
+                      error={!formData.doctorId}
+                      helperText={!formData.doctorId ? "Please select a doctor" : ""}
                     />
                   )}
-                  value={selectedDoctor}
+                  value={doctors.find(d => d._id === formData.doctorId) || null}
                   onChange={(_, newValue) => {
-                    setSelectedDoctor(newValue);
                     setFormData({ 
                       ...formData, 
                       doctorId: newValue?._id || '' 
@@ -350,18 +340,16 @@ export default function Appointments() {
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setOpenDialog(false)}>Cancel</Button>
-          <Button onClick={handleSubmit} variant="contained" color="primary">
-            Proceed to Payment
+          <Button 
+            onClick={handleSubmit} 
+            variant="contained" 
+            color="primary"
+            disabled={loading}
+          >
+            {loading ? <CircularProgress size={24} /> : 'Book Appointment'}
           </Button>
         </DialogActions>
       </Dialog>
-
-      <PaymentModal
-        open={openPaymentModal}
-        onClose={() => setOpenPaymentModal(false)}
-        appointmentData={JSON.parse(localStorage.getItem('pendingAppointment') || '{}')}
-        onPaymentComplete={handlePaymentComplete}
-      />
 
       <Snackbar
         open={openSnackbar}

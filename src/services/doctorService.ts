@@ -1,58 +1,24 @@
-import axios from 'axios';
+import api from '../config/axios';
+import { Doctor } from '../types/appointment';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
-
-export interface Doctor {
-  _id: string;
-  name: string;
-  specialty: string;
-  consultationFee: number;
-  availability: {
-    date: string;
-    slots: {
-      time: string;
-      isBooked: boolean;
-    }[];
-  }[];
-}
-
-class DoctorService {
-  async searchDoctors(criteria: {
-    name?: string;
-    specialty?: string;
-    availableDate?: string;
-    availableTime?: string;
-  }): Promise<Doctor[]> {
-    try {
-      const response = await axios.get(`${API_URL}/api/doctors/search`, { params: criteria });
-      return response.data;
-    } catch (error) {
-      console.error('Error searching doctors:', error);
-      throw error;
-    }
+export const searchDoctors = async (searchParams: Record<string, string>) => {
+  try {
+    const response = await api.get<Doctor[]>('/api/doctors/search', {
+      params: searchParams
+    });
+    return response.data;
+  } catch (error) {
+    console.error('Doctor search error:', error);
+    throw error;
   }
+};
 
-  async getAllDoctors(): Promise<Doctor[]> {
-    try {
-      const response = await axios.get(`${API_URL}/api/doctors`);
-      return response.data;
-    } catch (error) {
-      console.error('Error fetching doctors:', error);
-      throw error;
-    }
+export const getAllDoctors = async () => {
+  try {
+    const response = await api.get<Doctor[]>('/api/doctors');
+    return response.data;
+  } catch (error) {
+    console.error('Get all doctors error:', error);
+    throw error;
   }
-
-  async getDoctorAvailability(doctorId: string, date: string): Promise<any> {
-    try {
-      const response = await axios.get(`${API_URL}/api/doctors/${doctorId}/availability`, {
-        params: { date }
-      });
-      return response.data;
-    } catch (error) {
-      console.error('Error fetching doctor availability:', error);
-      throw error;
-    }
-  }
-}
-
-export default new DoctorService();
+};
