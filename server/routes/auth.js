@@ -1,23 +1,53 @@
 import express from 'express';
 import jwt from 'jsonwebtoken';
-import User from '../models/User.js'; // Ensure you add the `.js` extension
+import bcrypt from 'bcryptjs';
+import User from '../models/User.js';
+
 const router = express.Router();
 
 router.post('/register', async (req, res) => {
   try {
-    const { email, password, name, role } = req.body;
-    const existingUser = await User.findOne({ email });
-    
-    if (existingUser) {
-      return res.status(400).json({ message: 'User already exists' });
+    const { email, password, name, role = 'patient' } = req.body;
+
+    // Validate input
+    if (!email || !password || !name) {
+      return res.status(400).json({ message: 'All fields are required' });
     }
 
-    const user = new User({ email, password, name, role });
+    // Check if user already exists
+    const existingUser = await User.findOne({ email: email.toLowerCase() });
+    if (existingUser) {
+      return res.status(400).json({ message: 'Email already registered' });
+    }
+
+    // Create new user
+    const user = new User({
+      email: email.toLowerCase(),
+      password,
+      name,
+      role
+    });
+
     await user.save();
 
-    const token = jwt.sign({ userId: user._id }, process.env.JWT_SECRET);
-    res.status(201).json({ token, user: { id: user._id, email, name, role } });
+    // Generate JWT token
+    const token = jwt.sign(
+      { userId: user._id },
+      process.env.JWT_SECRET,
+      { expiresIn: '24h' }
+    );
+
+    // Return user data without password
+    const userResponse = {
+      id: user._id,
+      email: user.email,
+      name: user.name,
+      role: user.role
+    };
+
+    res.status(201).json({ token, user: userResponse });
   } catch (error) {
+    console.error('Registration error:', error);
     res.status(500).json({ message: 'Error creating user' });
   }
 });
@@ -25,15 +55,42 @@ router.post('/register', async (req, res) => {
 router.post('/login', async (req, res) => {
   try {
     const { email, password } = req.body;
-    const user = await User.findOne({ email });
 
-    if (!user || !(await user.comparePassword(password))) {
+    // Validate input
+    if (!email || !password) {
+      return res.status(400).json({ message: 'Email and password are required' });
+    }
+
+    // Find user
+    const user = await User.findOne({ email: email.toLowerCase() });
+    if (!user) {
       return res.status(401).json({ message: 'Invalid credentials' });
     }
 
-    const token = jwt.sign({ userId: user._id }, process.env.JWT_SECRET);
-    res.json({ token, user: { id: user._id, email, name: user.name, role: user.role } });
+    // Verify password
+    const isValidPassword = await bcrypt.compare(password, user.password);
+    if (!isValidPassword) {
+      return res.status(401).json({ message: 'Invalid credentials' });
+    }
+
+    // Generate JWT token
+    const token = jwt.sign(
+      { userId: user._id },
+      process.env.JWT_SECRET,
+      { expiresIn: '24h' }
+    );
+
+    // Return user data without password
+    const userResponse = {
+      id: user._id,
+      email: user.email,
+      name: user.name,
+      role: user.role
+    };
+
+    res.json({ token, user: userResponse });
   } catch (error) {
+    console.error('Login error:', error);
     res.status(500).json({ message: 'Error logging in' });
   }
 });
@@ -52,8 +109,16 @@ router.get('/validate', async (req, res) => {
       return res.status(404).json({ message: 'User not found' });
     }
 
-    res.json({ user });
+    const userResponse = {
+      id: user._id,
+      email: user.email,
+      name: user.name,
+      role: user.role
+    };
+
+    res.json({ user: userResponse });
   } catch (error) {
+    console.error('Token validation error:', error);
     res.status(401).json({ message: 'Invalid token' });
   }
 });

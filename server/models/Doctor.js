@@ -15,16 +15,25 @@ const doctorSchema = new mongoose.Schema({
   user: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
-    required: true
+    required: true,
+    unique: true
   },
   specialty: {
     type: String,
     required: true
   },
   qualifications: [String],
-  experience: Number,
+  experience: {
+    type: Number,
+    required: true,
+    min: 0
+  },
+  consultationFee: {
+    type: Number,
+    required: true,
+    min: 0
+  },
   availability: [availabilitySchema],
-  consultationFee: Number,
   rating: {
     type: Number,
     min: 0,
